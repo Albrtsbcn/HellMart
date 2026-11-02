@@ -16,7 +16,7 @@ class DBconnection
         $user = "root";
         $password = "";
 
-        $this->dbconn = @mysqli_connect($host, $user, $password, $dbname, $port);
+        $this->dbconn = mysqli_connect($host, $user, $password, $dbname, $port);
 
         if (!$this->dbconn) {
             throw new DatabaseException("Connection failed: " . mysqli_connect_error());
