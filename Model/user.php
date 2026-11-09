@@ -25,7 +25,7 @@ if (isset($_GET['aksi']) && $_GET['aksi'] == 'hapus') {
     exit();
 }
 
-$result = mysqli_query($conn, "SELECT user.*, role.nama_role FROM user LEFT JOIN role ON user.idrole = role.idrole");
+$result = mysqli_query($conn, "SELECT * FROM v_user");
 $role_res = mysqli_query($conn, "SELECT * FROM role");
 $data_role = mysqli_fetch_all($role_res, MYSQLI_ASSOC);
 ?>

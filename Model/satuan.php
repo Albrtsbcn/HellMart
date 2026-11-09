@@ -3,7 +3,6 @@ require_once __DIR__ . '/../dbconnection.php';
 $db = new DBconnection();
 $conn = $db->get_connection();
 
-// 1. PROSES SIMPAN DATA (TAMBAH & UPDATE)
 if ($_SERVER['REQUEST_METHOD'] == 'POST' && isset($_POST['aksi'])) {
     $nama_satuan = mysqli_real_escape_string($conn, $_POST['nama_satuan']);
     
@@ -23,7 +22,7 @@ if (isset($_GET['aksi']) && $_GET['aksi'] == 'hapus') {
     exit();
 }
 
-$result = mysqli_query($conn, "SELECT * FROM satuan");
+$result = mysqli_query($conn, "SELECT * FROM v_satuan");
 ?>
 
 <div class="container-fluid px-0">
@@ -31,7 +30,7 @@ $result = mysqli_query($conn, "SELECT * FROM satuan");
         <div class="d-flex justify-content-between align-items-center">
             <div>
                 <h3 class="fw-bold text-dark mb-1">Data Satuan</h3>
-                <p class="text-muted mb-0">Kelola satuan unit barang inventaris toko pertanian secara terpusat.</p>
+                <p class="text-muted mb-0">Kelola satuan unit barang inventaris toko pertanian.</p>
             </div>
             <button type="button" class="btn btn-success fw-bold px-4 py-2 rounded-3 shadow-sm" data-bs-toggle="modal" data-bs-target="#modalTambah">
                 + Tambah Satuan
@@ -65,12 +64,10 @@ $result = mysqli_query($conn, "SELECT * FROM satuan");
                                         data-bs-target="#modalEdit<?= $row['idsatuan']; ?>">
                                     Edit
                                 </button>
-                                <!-- Tombol Hapus (Mengarah ke file yang sama dengan parameter aksi=hapus) -->
                                 <a href="index.php?page=satuan&aksi=hapus&id=<?= $row['idsatuan']; ?>" class="btn btn-danger btn-sm fw-bold px-3 py-1 rounded-2 shadow-sm" onclick="return confirm('Yakin ingin menghapus data ini?')">Hapus</a>
                             </td>
                         </tr>
 
-                        <!-- MODAL EDIT / UPDATE PER BARIS -->
                         <div class="modal fade" id="modalEdit<?= $row['idsatuan']; ?>" tabindex="-1" aria-hidden="true">
                             <div class="modal-dialog modal-dialog-centered">
                                 <div class="modal-content border-0 shadow rounded-4">
@@ -106,7 +103,6 @@ $result = mysqli_query($conn, "SELECT * FROM satuan");
     </div>
 </div>
 
-<!-- MODAL TAMBAH DATA -->
 <div class="modal fade" id="modalTambah" tabindex="-1" aria-hidden="true">
     <div class="modal-dialog modal-dialog-centered">
         <div class="modal-content border-0 shadow rounded-4">
@@ -130,4 +126,3 @@ $result = mysqli_query($conn, "SELECT * FROM satuan");
         </div>
     </div>
 </div>
-<!-- END MODAL TAMBAH -->

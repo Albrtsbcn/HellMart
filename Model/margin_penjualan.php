@@ -9,10 +9,10 @@ if ($_SERVER['REQUEST_METHOD'] == 'POST' && isset($_POST['aksi'])) {
     $iduser = intval($_POST['iduser']);
     
     if ($_POST['aksi'] == 'tambah') {
-        mysqli_query($conn, "INSERT INTO margin_penjualan (persen, status, iduser) VALUES ($persen, $status, $iduser)");
+        mysqli_query($conn, "INSERT INTO margin_penjualan (persen, status, iduser, created_at, updated_at) VALUES ($persen, $status, $iduser, NOW(), NOW())");
     } elseif ($_POST['aksi'] == 'update') {
         $id = intval($_POST['idmargin_penjualan']);
-        mysqli_query($conn, "UPDATE margin_penjualan SET persen=$persen, status=$status, iduser=$iduser WHERE idmargin_penjualan=$id");
+        mysqli_query($conn, "UPDATE margin_penjualan SET persen=$persen, status=$status, iduser=$iduser, updated_at=NOW() WHERE idmargin_penjualan=$id");
     }
     header("Location: index.php?page=margin");
     exit();
@@ -24,8 +24,7 @@ if (isset($_GET['aksi']) && $_GET['aksi'] == 'hapus') {
     header("Location: index.php?page=margin");
     exit();
 }
-
-$result = mysqli_query($conn, "SELECT margin_penjualan.*, user.username FROM margin_penjualan LEFT JOIN user ON margin_penjualan.iduser = user.iduser");
+$result = mysqli_query($conn, "SELECT * FROM v_margin_penjualan");
 $user_res = mysqli_query($conn, "SELECT * FROM user");
 $data_user = mysqli_fetch_all($user_res, MYSQLI_ASSOC);
 ?>
@@ -35,7 +34,7 @@ $data_user = mysqli_fetch_all($user_res, MYSQLI_ASSOC);
         <div class="d-flex justify-content-between align-items-center">
             <div>
                 <h3 class="fw-bold text-dark mb-1">Data Margin Penjualan</h3>
-                <p class="text-muted mb-0">Kelola persentase keuntungan eceran produk.</p>
+                <p class="text-muted mb-0">Kelola persentase keuntungan eceran.</p>
             </div>
             <button type="button" class="btn btn-success fw-bold px-4 py-2 rounded-3 shadow-sm" data-bs-toggle="modal" data-bs-target="#modalTambahMargin">+ Tambah Margin</button>
         </div>
@@ -50,6 +49,7 @@ $data_user = mysqli_fetch_all($user_res, MYSQLI_ASSOC);
                         <th class="py-3">Persen (%)</th>
                         <th class="py-3">Status</th>
                         <th class="py-3">User / Admin</th>
+                        <th class="py-3">Dibuat / Diubah</th>
                         <th class="py-3 text-center">Aksi</th>
                     </tr>
                 </thead>
@@ -63,6 +63,7 @@ $data_user = mysqli_fetch_all($user_res, MYSQLI_ASSOC);
                             <td class="fw-bold text-success"><?= $row['persen']; ?>%</td>
                             <td><span class="badge bg-success-subtle text-success px-2 py-1"><?= $row['status']; ?></span></td>
                             <td><?= htmlspecialchars($row['username'] ?? '-'); ?></td>
+                            <td class="small text-muted"><?= $row['created_at']; ?></td>
                             <td class="text-center">
                                 <button type="button" class="btn btn-warning btn-sm fw-bold text-dark px-3 py-1 rounded-2 shadow-sm me-1" data-bs-toggle="modal" data-bs-target="#modalEditMargin<?= $row['idmargin_penjualan']; ?>">Edit</button>
                                 <a href="index.php?page=margin&aksi=hapus&id=<?= $row['idmargin_penjualan']; ?>" class="btn btn-danger btn-sm fw-bold px-3 py-1 rounded-2 shadow-sm" onclick="return confirm('Yakin ingin menghapus data ini?')">Hapus</a>
@@ -106,7 +107,7 @@ $data_user = mysqli_fetch_all($user_res, MYSQLI_ASSOC);
                             </div>
                         </div>
                     <?php endwhile; else: ?>
-                        <tr><td colspan="5" class="text-center py-4 text-muted">Belum ada data margin penjualan.</td></tr>
+                        <tr><td colspan="6" class="text-center py-4 text-muted">Belum ada data margin penjualan.</td></tr>
                     <?php endif; ?>
                 </tbody>
             </table>

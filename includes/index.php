@@ -25,10 +25,7 @@ $jml_user = mysqli_fetch_assoc($q_user)['total'] ?? 0;
     <title>HellMart - Manajemen Data Toko Pertanian</title>
     <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/css/bootstrap.min.css" rel="stylesheet">
     <style>
-        html {
-        filter: grayscale(100%);
-        -webkit-filter: grayscale(100%);
-        }
+        
         body {
             background-color: #ffffff; 
             color: #000000;     
@@ -72,7 +69,6 @@ $jml_user = mysqli_fetch_assoc($q_user)['total'] ?? 0;
     <div class="container-fluid">
         <div class="row">
             
-            <!-- Sidebar Menu Kiri -->
             <nav class="col-md-3 col-lg-2 d-md-block sidebar py-4 px-3">
                 <h6 class="text-muted text-uppercase fw-bold mb-3 px-2 fs-7">Menu Utama</h6>
                 <ul class="nav flex-column nav-pills gap-1">
@@ -111,6 +107,9 @@ $jml_user = mysqli_fetch_assoc($q_user)['total'] ?? 0;
                     </li>
                     <li class="nav-item">
                         <a class="nav-link <?= (in_array($page, ['penjualan', 'tambah_penjualan'])) ? 'active' : ''; ?>" href="index.php?page=penjualan">Penjualan</a>
+                    </li>
+                    <li class="nav-item">
+                        <a class="nav-link <?= ($page == 'kartu_stok') ? 'active' : ''; ?>" href="index.php?page=kartu_stok">Kartu Stok</a>
                     </li>
                 </ul>
             </nav>
@@ -167,7 +166,6 @@ $jml_user = mysqli_fetch_assoc($q_user)['total'] ?? 0;
                         <div class="card border-0 shadow-sm rounded-4 p-4 bg-white">
                             <div class="d-flex justify-content-between align-items-center mb-3">
                                 <h6 class="text-uppercase fw-bold text-muted small mb-0">Ringkasan Data Master & Akses Sistem</h6>
-                                <span class="badge bg-success-subtle text-success border border-success-subtle rounded-pill px-3 py-1">Database Terverifikasi</span>
                             </div>
                             <div class="row g-3">
                                 <div class="col-md-3">
@@ -216,6 +214,13 @@ $jml_user = mysqli_fetch_assoc($q_user)['total'] ?? 0;
                 <?php elseif ($page == 'retur'): include '../Model/Transaksi/retur.php'; ?>
                 <?php elseif ($page == 'penjualan'): include '../Model/Transaksi/penjualan.php'; ?>
                 <?php elseif ($page == 'tambah_penjualan'): include '../Model/Transaksi/tambah_penjualan.php'; ?>
+                <?php elseif ($page == 'tambah_retur'): include '../Model/Transaksi/tambah_retur.php'; ?>
+                <?php elseif ($page == 'detail_penjualan'): include '../Model/Transaksi/detail_penjualan.php'; ?>
+
+                <?php elseif ($page == 'retur'): include '../Model/Transaksi/retur.php'; ?>
+                <?php elseif ($page == 'tambah_retur'): include '../Model/Transaksi/tambah_retur.php'; ?>
+                <?php elseif ($page == 'detail_retur'): include '../Model/Transaksi/detail_retur.php'; ?>
+                <?php elseif ($page == 'kartu_stok'): include '../Model/Transaksi/kartu_stok.php'; ?>
 
                 <?php endif; ?>
             </main>

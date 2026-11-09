@@ -27,7 +27,7 @@ if (isset($_GET['aksi']) && $_GET['aksi'] == 'hapus') {
     exit();
 }
 
-$result = mysqli_query($conn, "SELECT barang.*, satuan.nama_satuan FROM barang LEFT JOIN satuan ON barang.idsatuan = satuan.idsatuan");
+$result = mysqli_query($conn, "SELECT * FROM v_barang");
 $satuan_res = mysqli_query($conn, "SELECT * FROM satuan");
 $data_satuan = mysqli_fetch_all($satuan_res, MYSQLI_ASSOC);
 ?>
@@ -37,7 +37,7 @@ $data_satuan = mysqli_fetch_all($satuan_res, MYSQLI_ASSOC);
         <div class="d-flex justify-content-between align-items-center">
             <div>
                 <h3 class="fw-bold text-dark mb-1">Data Barang</h3>
-                <p class="text-muted mb-0">Kelola master katalog komoditas pertanian sesuai struktur CDM.</p>
+                <p class="text-muted mb-0">Kelola master katalog komoditas pertanian.</p>
             </div>
             <button type="button" class="btn btn-success fw-bold px-4 py-2 rounded-3 shadow-sm" data-bs-toggle="modal" data-bs-target="#modalTambahBarang">
                 + Tambah Barang
@@ -77,7 +77,6 @@ $data_satuan = mysqli_fetch_all($satuan_res, MYSQLI_ASSOC);
                             </td>
                         </tr>
 
-                        <!-- MODAL EDIT BARANG -->
                         <div class="modal fade" id="modalEditBarang<?= $row['idbarang']; ?>" tabindex="-1" aria-hidden="true">
                             <div class="modal-dialog modal-dialog-centered">
                                 <div class="modal-content border-0 shadow rounded-4">

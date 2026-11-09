@@ -23,7 +23,7 @@ if (isset($_GET['aksi']) && $_GET['aksi'] == 'hapus') {
     exit();
 }
 
-$result = mysqli_query($conn, "SELECT * FROM role");
+$result = mysqli_query($conn, "SELECT * FROM v_role");
 ?>
 
 <div class="container-fluid px-0">
@@ -31,7 +31,7 @@ $result = mysqli_query($conn, "SELECT * FROM role");
         <div class="d-flex justify-content-between align-items-center">
             <div>
                 <h3 class="fw-bold text-dark mb-1">Data Role</h3>
-                <p class="text-muted mb-0">Kelola hak akses dan peran pengguna sistem.</p>
+                <p class="text-muted mb-0">Kelola hak akses dan peran pengguna.</p>
             </div>
             <button type="button" class="btn btn-success fw-bold px-4 py-2 rounded-3 shadow-sm" data-bs-toggle="modal" data-bs-target="#modalTambahRole">+ Tambah Role</button>
         </div>
@@ -95,7 +95,6 @@ $result = mysqli_query($conn, "SELECT * FROM role");
     </div>
 </div>
 
-<!-- MODAL TAMBAH ROLE -->
 <div class="modal fade" id="modalTambahRole" tabindex="-1" aria-hidden="true">
     <div class="modal-dialog modal-dialog-centered">
         <div class="modal-content border-0 shadow rounded-4">

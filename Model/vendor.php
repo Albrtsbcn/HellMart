@@ -25,7 +25,7 @@ if (isset($_GET['aksi']) && $_GET['aksi'] == 'hapus') {
     exit();
 }
 
-$result = mysqli_query($conn, "SELECT * FROM vendor");
+$result = mysqli_query($conn, "SELECT * FROM v_vendor");
 ?>
 
 <div class="container-fluid px-0">

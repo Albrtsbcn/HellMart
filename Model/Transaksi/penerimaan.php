@@ -4,8 +4,7 @@ $db = new DBconnection();
 $conn = $db->get_connection();
 
 if (isset($_GET['terima_id'])) {
-    $id_pengadaan = mysqli_real_escape_string($conn, $_GET['terima_id']);
-    
+    $id_pengadaan = intval($_GET['terima_id']);
     $iduser = $_SESSION['iduser'] ?? 1; 
 
     mysqli_begin_transaction($conn);
@@ -21,13 +20,9 @@ if (isset($_GET['terima_id'])) {
         $q_detail_po = mysqli_query($conn, "SELECT * FROM detail_pengadaan WHERE idpengadaan = '$id_pengadaan'");
         
         while ($item = mysqli_fetch_assoc($q_detail_po)) {
-            $idbarang     = $item['idbarang'];
-            $jumlah       = $item['jumlah'];
-            $harga_satuan = $item['harga_satuan'];
-
-            $query_sp = "CALL sp_tambah_detail_penerimaan('$idpenerimaan_baru', '$idbarang', '$jumlah', '$harga_satuan')";
+            $query_sp = "CALL sp_tambah_detail_penerimaan('$idpenerimaan_baru', '{$item['idbarang']}', '{$item['jumlah']}', '{$item['harga_satuan']}')";
             if (!mysqli_query($conn, $query_sp)) {
-                throw new Exception("Gagal memanggil SP detail penerimaan: " . mysqli_error($conn));
+                throw new Exception("Gagal mengeksekusi SP detail penerimaan: " . mysqli_error($conn));
             }
         }
 
@@ -40,29 +35,19 @@ if (isset($_GET['terima_id'])) {
     }
 }
 
-$query_pending = "SELECT pengadaan.*, vendor.nama_vendor, user.username 
-                  FROM pengadaan 
-                  JOIN vendor ON pengadaan.vendor_idvendor = vendor.idvendor 
-                  JOIN user ON pengadaan.user_iduser = user.iduser 
-                  WHERE pengadaan.idpengadaan NOT IN (SELECT idpengadaan FROM penerimaan)
-                  ORDER BY pengadaan.idpengadaan DESC";
-$result_pending = mysqli_query($conn, $query_pending);
+$result_pending = mysqli_query($conn, "SELECT p.*, v.nama_vendor, u.username FROM pengadaan p JOIN vendor v ON p.vendor_idvendor = v.idvendor JOIN user u ON p.user_iduser = u.iduser WHERE p.idpengadaan NOT IN (SELECT idpengadaan FROM penerimaan) ORDER BY p.idpengadaan DESC");
 
-$query_selesai = "SELECT penerimaan.*, user.username 
-                  FROM penerimaan 
-                  JOIN user ON penerimaan.iduser = user.iduser 
-                  ORDER BY penerimaan.idpenerimaan DESC";
-$result_selesai = mysqli_query($conn, $query_selesai);
+$result_selesai = mysqli_query($conn, "SELECT p.*, u.username FROM penerimaan p JOIN user u ON p.iduser = u.iduser ORDER BY p.idpenerimaan DESC");
 ?>
+
 
 <div class="container-fluid px-4">
     <h2 class="mt-4 fw-bold">Data Penerimaan Barang</h2>
-    <p class="text-muted">Kelola catatan penerimaan barang dari pesanan pengadaan (PO) vendor.</p>
+    <p class="text-muted">Kelola catatan penerimaan barang dari pesanan pengadaan vendor.</p>
 
-    <!-- TABEL ATAS: PENDING KONFIRMASI -->
     <div class="card shadow-sm mb-4">
-        <div class="card-header bg-dark text-white fw-bold">
-            Daftar Pengadaan (PO) Menunggu Konfirmasi Penerimaan
+        <div class="card-header text-dark fw-bold">
+            Daftar Pengadaan Menunggu Konfirmasi Penerimaan
         </div>
         <div class="card-body table-responsive">
             <table class="table table-bordered table-striped align-middle">
@@ -85,7 +70,7 @@ $result_selesai = mysqli_query($conn, $query_selesai);
                     ?>
                         <tr>
                             <td><?= $no++; ?></td>
-                            <td><strong>#<?= $row['idpengadaan']; ?></strong></td>
+                            <td><strong><?= $row['idpengadaan']; ?></strong></td>
                             <td><?= $row['timestamp']; ?></td>
                             <td><?= htmlspecialchars($row['nama_vendor']); ?></td>
                             <td>Rp <?= number_format($row['total_nilai'], 0, ',', '.'); ?></td>
@@ -111,10 +96,9 @@ $result_selesai = mysqli_query($conn, $query_selesai);
         </div>
     </div>
 
-    <!-- TABEL BAWAH: RIWAYAT SELESAI -->
     <div class="card shadow-sm">
-        <div class="card-header bg-dark text-white fw-bold">
-            Riwayat Penerimaan Barang Selesai
+        <div class="card-header text-dar fw-bold">
+            Daftar Riwayat Penerimaan Barang
         </div>
         <div class="card-body table-responsive">
             <table class="table table-bordered table-striped align-middle">
@@ -134,10 +118,10 @@ $result_selesai = mysqli_query($conn, $query_selesai);
                     ?>
                         <tr>
                             <td><?= $selesai['idpenerimaan']; ?></td>
-                            <td><?= $selesai['created_at']; ?></td> <!-- Menggunakan created_at sesuai CDM -->
-                            <td><strong>#<?= $selesai['idpengadaan']; ?></strong></td>
+                            <td><?= $selesai['created_at']; ?></td>
+                            <td><strong><?= $selesai['idpengadaan']; ?></strong></td>
                             <td><?= htmlspecialchars($selesai['username']); ?></td>
-                            <td><span class="badge bg-secondary text-white">Selesai</span></td>
+                            <td><span class="badge bg-success text-white">Selesai</span></td>
                         </tr>
                     <?php 
                         endwhile; 
