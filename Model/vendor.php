@@ -1,9 +1,38 @@
 <?php
 require_once __DIR__ . '/../dbconnection.php';
+
+if (session_status() === PHP_SESSION_NONE) {
+    session_start();
+}
+
 $db = new DBconnection();
 $conn = $db->get_connection();
 
+$role_aktif = $_SESSION['role'] ?? '';
+
+if (!empty($_SESSION['iduser'])) {
+    $iduser_aktif = intval($_SESSION['iduser']);
+    $q_role = mysqli_query($conn, "
+        SELECT r.*
+        FROM user u
+        LEFT JOIN role r ON u.idrole = r.idrole
+        WHERE u.iduser = $iduser_aktif
+        LIMIT 1
+    ");
+    if ($q_role && $row_role = mysqli_fetch_assoc($q_role)) {
+        $role_aktif = $row_role['nama_role'] ?? $row_role['role'] ?? $row_role['nama'] ?? $role_aktif;
+        $_SESSION['role'] = $role_aktif;
+    }
+}
+
+$is_admin = (strtolower(trim((string)$role_aktif)) === 'administrator');
+
 if ($_SERVER['REQUEST_METHOD'] == 'POST' && isset($_POST['aksi'])) {
+    if (!$is_admin) {
+        echo "<script>alert('Akses ditolak! Hanya Administrator yang dapat menambah atau mengubah data vendor.'); window.location='index.php?page=vendor';</script>";
+        exit();
+    }
+
     $nama_vendor = mysqli_real_escape_string($conn, $_POST['nama_vendor']);
     $badan_hukum = mysqli_real_escape_string($conn, $_POST['badan_hukum']);
     $status = intval($_POST['status']);
@@ -14,14 +43,19 @@ if ($_SERVER['REQUEST_METHOD'] == 'POST' && isset($_POST['aksi'])) {
         $id = intval($_POST['idvendor']);
         mysqli_query($conn, "UPDATE vendor SET nama_vendor='$nama_vendor', badan_hukum='$badan_hukum', status=$status WHERE idvendor=$id");
     }
-    header("Location: index.php?page=vendor");
+    echo "<script>window.location='index.php?page=vendor';</script>";
     exit();
 }
 
 if (isset($_GET['aksi']) && $_GET['aksi'] == 'hapus') {
+    if (!$is_admin) {
+        echo "<script>alert('Akses ditolak! Hanya Administrator yang dapat menghapus data vendor.'); window.location='index.php?page=vendor';</script>";
+        exit();
+    }
+
     $id = intval($_GET['id']);
     mysqli_query($conn, "DELETE FROM vendor WHERE idvendor = $id");
-    header("Location: index.php?page=vendor");
+    echo "<script>window.location='index.php?page=vendor';</script>";
     exit();
 }
 
@@ -35,7 +69,9 @@ $result = mysqli_query($conn, "SELECT * FROM v_vendor");
                 <h3 class="fw-bold text-dark mb-1">Data Vendor</h3>
                 <p class="text-muted mb-0">Kelola mitra distributor dan pabrik penyedia barang.</p>
             </div>
-            <button type="button" class="btn btn-success fw-bold px-4 py-2 rounded-3 shadow-sm" data-bs-toggle="modal" data-bs-target="#modalTambahVendor">+ Tambah Vendor</button>
+            <?php if ($is_admin): ?>
+                <button type="button" class="btn btn-success fw-bold px-4 py-2 rounded-3 shadow-sm" data-bs-toggle="modal" data-bs-target="#modalTambahVendor">+ Tambah Vendor</button>
+            <?php endif; ?>
         </div>
     </div>
 
@@ -48,7 +84,9 @@ $result = mysqli_query($conn, "SELECT * FROM v_vendor");
                         <th class="py-3">Nama Vendor</th>
                         <th class="py-3">Badan Hukum</th>
                         <th class="py-3">Status</th>
-                        <th class="py-3 text-center">Aksi</th>
+                        <?php if ($is_admin): ?>
+                            <th class="py-3 text-center">Aksi</th>
+                        <?php endif; ?>
                     </tr>
                 </thead>
                 <tbody>
@@ -62,11 +100,15 @@ $result = mysqli_query($conn, "SELECT * FROM v_vendor");
                             <td><?= htmlspecialchars($row['badan_hukum'] ?? '-'); ?></td>
                             <td><span class="badge bg-success-subtle text-success px-2 py-1"><?= $row['status'] ?? '1'; ?></span></td>
                             <td class="text-center">
-                                <button type="button" class="btn btn-warning btn-sm fw-bold text-dark px-3 py-1 rounded-2 shadow-sm me-1" data-bs-toggle="modal" data-bs-target="#modalEditVendor<?= $row['idvendor']; ?>">Edit</button>
-                                <a href="index.php?page=vendor&aksi=hapus&id=<?= $row['idvendor']; ?>" class="btn btn-danger btn-sm fw-bold px-3 py-1 rounded-2 shadow-sm" onclick="return confirm('Yakin ingin menghapus data ini?')">Hapus</a>
+                                <?php if ($is_admin): ?>
+                                    <button type="button" class="btn btn-warning btn-sm fw-bold text-dark px-3 py-1 rounded-2 shadow-sm me-1" data-bs-toggle="modal" data-bs-target="#modalEditVendor<?= $row['idvendor']; ?>">Edit</button>
+                                    <a href="index.php?page=vendor&aksi=hapus&id=<?= $row['idvendor']; ?>" class="btn btn-danger btn-sm fw-bold px-3 py-1 rounded-2 shadow-sm" onclick="return confirm('Yakin ingin menghapus data ini?')">Hapus</a>
+                
+                                <?php endif; ?>
                             </td>
                         </tr>
 
+                        <?php if ($is_admin): ?>
                         <div class="modal fade" id="modalEditVendor<?= $row['idvendor']; ?>" tabindex="-1" aria-hidden="true">
                             <div class="modal-dialog modal-dialog-centered">
                                 <div class="modal-content border-0 shadow rounded-4">
@@ -99,6 +141,7 @@ $result = mysqli_query($conn, "SELECT * FROM v_vendor");
                                 </div>
                             </div>
                         </div>
+                        <?php endif; ?>
                     <?php endwhile; else: ?>
                         <tr><td colspan="5" class="text-center py-4 text-muted">Belum ada data vendor.</td></tr>
                     <?php endif; ?>
@@ -108,6 +151,7 @@ $result = mysqli_query($conn, "SELECT * FROM v_vendor");
     </div>
 </div>
 
+<?php if ($is_admin): ?>
 <div class="modal fade" id="modalTambahVendor" tabindex="-1" aria-hidden="true">
     <div class="modal-dialog modal-dialog-centered">
         <div class="modal-content border-0 shadow rounded-4">
@@ -139,3 +183,4 @@ $result = mysqli_query($conn, "SELECT * FROM v_vendor");
         </div>
     </div>
 </div>
+<?php endif; ?>

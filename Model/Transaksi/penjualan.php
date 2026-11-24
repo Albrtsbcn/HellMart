@@ -1,7 +1,34 @@
 <?php
 require_once __DIR__ . '/../../dbconnection.php';
+
+if (session_status() === PHP_SESSION_NONE) {
+    session_start();
+}
+
 $db = new DBconnection();
 $conn = $db->get_connection();
+
+$role_aktif = $_SESSION['role'] ?? '';
+
+if (!empty($_SESSION['iduser'])) {
+    $iduser_aktif = intval($_SESSION['iduser']);
+    $q_role = mysqli_query($conn, "
+        SELECT r.*
+        FROM user u
+        LEFT JOIN role r ON u.idrole = r.idrole
+        WHERE u.iduser = $iduser_aktif
+        LIMIT 1
+    ");
+    if ($q_role && $row_role = mysqli_fetch_assoc($q_role)) {
+        $role_aktif = $row_role['nama_role'] ?? $row_role['role'] ?? $row_role['nama'] ?? $role_aktif;
+        $_SESSION['role'] = $role_aktif;
+    }
+}
+
+$role_clean = strtolower(trim((string)$role_aktif));
+$is_admin = ($role_clean === 'administrator');
+$is_kasir = ($role_clean === 'kasir');
+$can_tambah_penjualan = ($is_admin || $is_kasir);
 
 $query = "SELECT p.idpenjualan, p.created_at, p.subtotal_nilai, p.ppn, p.total_nilai, 
                  u.username, m.persen AS margin_persen 
@@ -15,7 +42,9 @@ $result = mysqli_query($conn, $query);
 <div class="card shadow-sm border-0 rounded-4">
     <div class="card-header text-dark d-flex justify-content-between align-items-center py-3 px-4 rounded-top-4">
         <h5 class="mb-0 fw-bold">Data Transaksi Penjualan</h5>
-        <a href="/HellMart/includes/index.php?page=tambah_penjualan" class="btn btn-success fw-bold px-3 py-2 rounded-3 shadow-sm">+ Tambah Penjualan</a>
+        <?php if ($can_tambah_penjualan): ?>
+            <a href="/HellMart/includes/index.php?page=tambah_penjualan" class="btn btn-success fw-bold px-3 py-2 rounded-3 shadow-sm">+ Tambah Penjualan</a>
+        <?php endif; ?>
     </div>
     <div class="card-body table-responsive p-4">
         <table class="table table-hover align-middle mb-0">

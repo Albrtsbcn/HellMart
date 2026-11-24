@@ -1,29 +1,64 @@
 <?php
 require_once __DIR__ . '/../dbconnection.php';
+
+if (session_status() === PHP_SESSION_NONE) {
+    session_start();
+}
+
 $db = new DBconnection();
 $conn = $db->get_connection();
 
+$role_aktif = $_SESSION['role'] ?? '';
+
+if (!empty($_SESSION['iduser'])) {
+    $iduser_aktif = intval($_SESSION['iduser']);
+    $q_role = mysqli_query($conn, "
+        SELECT r.*
+        FROM user u
+        LEFT JOIN role r ON u.idrole = r.idrole
+        WHERE u.iduser = $iduser_aktif
+        LIMIT 1
+    ");
+    if ($q_role && $row_role = mysqli_fetch_assoc($q_role)) {
+        $role_aktif = $row_role['nama_role'] ?? $row_role['role'] ?? $row_role['nama'] ?? $role_aktif;
+        $_SESSION['role'] = $role_aktif;
+    }
+}
+
+$is_admin = (strtolower(trim((string)$role_aktif)) === 'administrator');
+
 if ($_SERVER['REQUEST_METHOD'] == 'POST' && isset($_POST['aksi'])) {
+    if (!$is_admin) {
+        echo "<script>alert('Akses ditolak! Hanya Administrator yang dapat menambah atau mengubah data barang.'); window.location='index.php?page=barang';</script>";
+        exit();
+    }
+
     $jenis = mysqli_real_escape_string($conn, $_POST['jenis']);
     $nama = mysqli_real_escape_string($conn, $_POST['nama']);
     $idsatuan = intval($_POST['idsatuan']);
     $harga = intval($_POST['harga']);
-    $status = intval($_POST['status']);
-    
+    $raw_status = intval($_POST['status']);
+    $status = ($raw_status === 0) ? 0 : 1;
+
     if ($_POST['aksi'] == 'tambah') {
         mysqli_query($conn, "INSERT INTO barang (jenis, nama, idsatuan, harga, status) VALUES ('$jenis', '$nama', $idsatuan, $harga, $status)");
     } elseif ($_POST['aksi'] == 'update') {
         $id = intval($_POST['idbarang']);
         mysqli_query($conn, "UPDATE barang SET jenis='$jenis', nama='$nama', idsatuan=$idsatuan, harga=$harga, status=$status WHERE idbarang=$id");
     }
-    header("Location: index.php?page=barang");
+    echo "<script>window.location='index.php?page=barang';</script>";
     exit();
 }
 
 if (isset($_GET['aksi']) && $_GET['aksi'] == 'hapus') {
+    if (!$is_admin) {
+        echo "<script>alert('Akses ditolak! Hanya Administrator yang dapat menghapus data barang.'); window.location='index.php?page=barang';</script>";
+        exit();
+    }
+
     $id = intval($_GET['id']);
     mysqli_query($conn, "DELETE FROM barang WHERE idbarang = $id");
-    header("Location: index.php?page=barang");
+    echo "<script>window.location='index.php?page=barang';</script>";
     exit();
 }
 
@@ -39,9 +74,11 @@ $data_satuan = mysqli_fetch_all($satuan_res, MYSQLI_ASSOC);
                 <h3 class="fw-bold text-dark mb-1">Data Barang</h3>
                 <p class="text-muted mb-0">Kelola master katalog komoditas pertanian.</p>
             </div>
-            <button type="button" class="btn btn-success fw-bold px-4 py-2 rounded-3 shadow-sm" data-bs-toggle="modal" data-bs-target="#modalTambahBarang">
-                + Tambah Barang
-            </button>
+            <?php if ($is_admin): ?>
+                <button type="button" class="btn btn-success fw-bold px-4 py-2 rounded-3 shadow-sm" data-bs-toggle="modal" data-bs-target="#modalTambahBarang">
+                    + Tambah Barang
+                </button>
+            <?php endif; ?>
         </div>
     </div>
 
@@ -56,13 +93,15 @@ $data_satuan = mysqli_fetch_all($satuan_res, MYSQLI_ASSOC);
                         <th class="py-3">Harga</th>
                         <th class="py-3">Satuan</th>
                         <th class="py-3">Status</th>
-                        <th class="py-3 text-center">Aksi</th>
+                        <?php if ($is_admin): ?>
+                            <th class="py-3 text-center">Aksi</th>
+                        <?php endif; ?>
                     </tr>
                 </thead>
                 <tbody>
-                    <?php 
+                    <?php
                     if ($result && mysqli_num_rows($result) > 0):
-                        while($row = mysqli_fetch_assoc($result)): 
+                        while ($row = mysqli_fetch_assoc($result)):
                     ?>
                         <tr>
                             <td class="px-4 fw-bold text-muted"><?= $row['idbarang']; ?></td>
@@ -71,12 +110,15 @@ $data_satuan = mysqli_fetch_all($satuan_res, MYSQLI_ASSOC);
                             <td class="fw-semibold">Rp <?= number_format($row['harga'], 0, ',', '.'); ?></td>
                             <td><?= htmlspecialchars($row['nama_satuan'] ?? '-'); ?></td>
                             <td><span class="badge bg-success-subtle text-success px-2 py-1"><?= $row['status']; ?></span></td>
-                            <td class="text-center">
-                                <button type="button" class="btn btn-warning btn-sm fw-bold text-dark px-3 py-1 rounded-2 shadow-sm me-1" data-bs-toggle="modal" data-bs-target="#modalEditBarang<?= $row['idbarang']; ?>">Edit</button>
-                                <a href="index.php?page=barang&aksi=hapus&id=<?= $row['idbarang']; ?>" class="btn btn-danger btn-sm fw-bold px-3 py-1 rounded-2 shadow-sm" onclick="return confirm('Yakin ingin menghapus data ini?')">Hapus</a>
-                            </td>
+                            <?php if ($is_admin): ?>
+                                <td class="text-center">
+                                    <button type="button" class="btn btn-warning btn-sm fw-bold text-dark px-3 py-1 rounded-2 shadow-sm me-1" data-bs-toggle="modal" data-bs-target="#modalEditBarang<?= $row['idbarang']; ?>">Edit</button>
+                                    <a href="index.php?page=barang&aksi=hapus&id=<?= $row['idbarang']; ?>" class="btn btn-danger btn-sm fw-bold px-3 py-1 rounded-2 shadow-sm" onclick="return confirm('Yakin ingin menghapus data ini?')">Hapus</a>
+                                </td>
+                            <?php endif; ?>
                         </tr>
 
+                        <?php if ($is_admin): ?>
                         <div class="modal fade" id="modalEditBarang<?= $row['idbarang']; ?>" tabindex="-1" aria-hidden="true">
                             <div class="modal-dialog modal-dialog-centered">
                                 <div class="modal-content border-0 shadow rounded-4">
@@ -121,6 +163,7 @@ $data_satuan = mysqli_fetch_all($satuan_res, MYSQLI_ASSOC);
                                 </div>
                             </div>
                         </div>
+                        <?php endif; ?>
                     <?php endwhile; else: ?>
                         <tr><td colspan="7" class="text-center py-4 text-muted">Belum ada data barang.</td></tr>
                     <?php endif; ?>
@@ -130,6 +173,7 @@ $data_satuan = mysqli_fetch_all($satuan_res, MYSQLI_ASSOC);
     </div>
 </div>
 
+<?php if ($is_admin): ?>
 <!-- MODAL TAMBAH BARANG -->
 <div class="modal fade" id="modalTambahBarang" tabindex="-1" aria-hidden="true">
     <div class="modal-dialog modal-dialog-centered">
@@ -175,3 +219,4 @@ $data_satuan = mysqli_fetch_all($satuan_res, MYSQLI_ASSOC);
         </div>
     </div>
 </div>
+<?php endif; ?>

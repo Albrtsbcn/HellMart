@@ -1,164 +1,256 @@
 <?php
 require_once __DIR__ . '/../../dbconnection.php';
-$conn = (new DBconnection())->get_connection();
+$db = new DBconnection();
+$conn = $db->get_connection();
+
+if (session_status() === PHP_SESSION_NONE) {
+    session_start();
+}
+
+$role_aktif = $_SESSION['role'] ?? '';
+
+if (!empty($_SESSION['iduser'])) {
+    $iduser_aktif = intval($_SESSION['iduser']);
+    $q_role = mysqli_query($conn, "
+        SELECT r.*
+        FROM user u
+        LEFT JOIN role r ON u.idrole = r.idrole
+        WHERE u.iduser = $iduser_aktif
+        LIMIT 1
+    ");
+    if ($q_role && $row_role = mysqli_fetch_assoc($q_role)) {
+        $role_aktif = $row_role['nama_role'] ?? $row_role['role'] ?? $row_role['nama'] ?? $role_aktif;
+        $_SESSION['role'] = $role_aktif;
+    }
+}
+
+$role_clean = strtolower(trim((string)$role_aktif));
+$is_admin = ($role_clean === 'administrator');
+$is_supervisor = ($role_clean === 'supervisor');
+$can_tambah_pengadaan = ($is_admin || $is_supervisor);
+
+if (!$can_tambah_pengadaan) {
+    echo "<script>alert('Akses ditolak! Hanya Administrator dan Supervisor yang dapat menambah pengadaan.'); window.location='index.php?page=pengadaan';</script>";
+    exit();
+}
 
 if (isset($_POST['simpan_pengadaan'])) {
-    $idvendor = $_POST['idvendor'];
-    $iduser   = $_POST['user_iduser'];
-    $ppn      = floatval($_POST['ppn'] ?? 0);
-
-    $arr_idbarang = $_POST['idbarang'] ?? [];
-    $arr_jumlah   = $_POST['jumlah'] ?? [];
-    $arr_harga    = $_POST['harga_satuan'] ?? [];
+    $vendor_idvendor = intval($_POST['vendor_idvendor']);
+    $user_iduser     = intval($_SESSION['iduser'] ?? 1);
+    
+    $arr_idbarang    = $_POST['idbarang'] ?? [];
+    $arr_jumlah      = $_POST['jumlah'] ?? [];
+    $arr_harga       = $_POST['harga_satuan'] ?? [];
 
     mysqli_begin_transaction($conn);
 
     try {
-        if (empty($arr_idbarang)) throw new Exception("Minimal harus ada 1 barang dalam pengadaan.");
-
-        $subtotal_nilai = 0;
-        $items = [];
+        $total_nilai = 0;
+        $detail_items = [];
 
         foreach ($arr_idbarang as $i => $idbarang) {
-            $jumlah = intval($arr_jumlah[$i]);
-            $harga  = floatval($arr_harga[$i]);
+            $id_b = intval($idbarang);
+            $jml  = intval($arr_jumlah[$i]);
+            $hrg  = intval($arr_harga[$i]);
 
-            if ($jumlah <= 0 || $harga <= 0 || empty($idbarang)) continue;
+            if ($id_b <= 0 || $jml <= 0) continue;
 
-            $sub_total = $jumlah * $harga;
-            $subtotal_nilai += $sub_total;
-            $items[] = compact('idbarang', 'jumlah', 'harga_satuan', 'sub_total');
+            $total_nilai += ($jml * $hrg);
+            $detail_items[] = [
+                'idbarang' => $id_b,
+                'jumlah'   => $jml,
+                'harga'    => $hrg
+            ];
         }
 
-        if (empty($items)) throw new Exception("Data detail barang pengadaan tidak valid.");
+        if (empty($detail_items)) {
+            throw new Exception("Minimal harus ada 1 barang valid dalam pengadaan.");
+        }
 
-        $total_nilai = $subtotal_nilai + $ppn;
-
-        if (!mysqli_query($conn, "INSERT INTO pengadaan (timestamp, subtotal_nilai, ppn, total_nilai, user_iduser, vendor_idvendor) VALUES (NOW(), '$subtotal_nilai', '$ppn', '$total_nilai', '$iduser', '$idvendor')")) {
+        $q_pengadaan = "INSERT INTO pengadaan (timestamp, status, total_nilai, vendor_idvendor, user_iduser) 
+                        VALUES (NOW(), '0', $total_nilai, $vendor_idvendor, $user_iduser)";
+        if (!mysqli_query($conn, $q_pengadaan)) {
             throw new Exception("Gagal menyimpan header pengadaan: " . mysqli_error($conn));
         }
+        $idpengadaan_baru = intval(mysqli_insert_id($conn));
 
-        $idpengadaan_baru = mysqli_insert_id($conn);
-
-        foreach ($items as $item) {
-            if (!mysqli_query($conn, "INSERT INTO detail_pengadaan (harga_satuan, jumlah, sub_total, idbarang, idpengadaan) VALUES ('{$item['harga_satuan']}', '{$item['jumlah']}', '{$item['sub_total']}', '{$item['idbarang']}', '$idpengadaan_baru')")) {
-                throw new Exception("Gagal menyimpan detail pengadaan: " . mysqli_error($conn));
+        foreach ($detail_items as $item) {
+            $q_sp = "CALL sp_tambah_detail_pengadaan($idpengadaan_baru, {$item['idbarang']}, {$item['jumlah']}, {$item['harga']})";
+            if (!mysqli_query($conn, $q_sp)) {
+                throw new Exception("Gagal mengeksekusi SP detail pengadaan: " . mysqli_error($conn));
+            }
+            while (mysqli_more_results($conn)) {
+                mysqli_next_result($conn);
             }
         }
 
         mysqli_commit($conn);
-        echo "<script>alert('Data pengadaan berhasil disimpan!'); window.location='index.php?page=pengadaan';</script>";
+        echo "<script>alert('Pengadaan berhasil disimpan!'); window.location='index.php?page=pengadaan';</script>";
+        exit();
 
     } catch (Exception $e) {
         mysqli_rollback($conn);
-        echo "<div class='alert alert-danger'>" . $e->getMessage() . "</div>";
+        echo "<script>alert('Error: " . addslashes($e->getMessage()) . "'); window.location='index.php?page=tambah_pengadaan';</script>";
+        exit();
     }
 }
 
-$vendor_result = mysqli_query($conn, "SELECT * FROM vendor");
-$user_result   = mysqli_query($conn, "SELECT * FROM user");
-$barang_result = mysqli_query($conn, "SELECT * FROM barang");
+$vendors = mysqli_query($conn, "SELECT * FROM vendor");
+$barangs = mysqli_query($conn, "SELECT idbarang, nama, harga FROM barang");
+$barang_options = "";
+while ($b = mysqli_fetch_assoc($barangs)) {
+    $barang_options .= "<option value=\"" . intval($b['idbarang']) . "\" data-harga=\"" . intval($b['harga']) . "\">" . htmlspecialchars($b['nama']) . "</option>";
+}
 ?>
 
-<div class="card shadow-sm border-0 rounded-4">
-    <div class="card-header bg-dark text-white fw-bold py-3 px-4 rounded-top-4">
-        Tambah Transaksi Pengadaan Barang Baru
-    </div>
-    <div class="card-body p-4">
-        <!-- PERBAIKAN: action dikosongkan agar diproses di file ini sendiri -->
-        <form action="" method="POST">
-            
-            <div class="row mb-3">
-                <div class="col-md-4">
-                    <label class="form-label fw-bold">Vendor</label>
-                    <select name="idvendor" class="form-select rounded-3" required>
-                        <option value="">-- Pilih Vendor --</option>
-                        <?php while($v = mysqli_fetch_assoc($vendor_result)): ?>
-                            <option value="<?= $v['idvendor']; ?>"><?= $v['nama_vendor']; ?></option>
-                        <?php endwhile; ?>
-                    </select>
-                </div>
-                <div class="col-md-4">
-                    <label class="form-label fw-bold">PPN (%)</label>
-                    <input type="number" step="0.01" name="ppn" class="form-control rounded-3" placeholder="Contoh: 11" required>
-                </div>
-                <div class="col-md-4">
-                    <label class="form-label fw-bold">User / Admin Pengelola</label>
-                    <select name="user_iduser" class="form-select rounded-3" required>
-                        <option value="">-- Pilih User --</option>
-                        <?php while($u = mysqli_fetch_assoc($user_result)): ?>
-                            <option value="<?= $u['iduser']; ?>"><?= $u['username']; ?></option>
-                        <?php endwhile; ?>
-                    </select>
-                </div>
+<div class="container-fluid px-0">
+    <div class="card border-0 shadow-sm rounded-4 p-4 mb-4 bg-white">
+        <div class="d-flex justify-content-between align-items-center">
+            <div>
+                <h3 class="fw-bold text-dark mb-1">Tambah Pengadaan Barang (PO)</h3>
+                <p class="text-muted mb-0">Buat pesanan pengadaan baru ke vendor dengan harga otomatis.</p>
             </div>
+            <a href="index.php?page=pengadaan" class="btn btn-dark fw-bold px-4 py-2 rounded-3 shadow-sm">
+                Kembali
+            </a>
+        </div>
+    </div>
 
-            <hr class="my-4">
+    <form action="" method="POST">
+        <div class="card border-0 shadow-sm rounded-4 p-4 mb-4 bg-white">
+            <div class="mb-3">
+                <label class="form-label fw-bold">Pilih Vendor</label>
+                <select name="vendor_idvendor" class="form-select" required>
+                    <option value="" disabled selected>-- Pilih Vendor --</option>
+                    <?php while ($v = mysqli_fetch_assoc($vendors)): ?>
+                        <option value="<?= intval($v['idvendor']); ?>"><?= htmlspecialchars($v['nama_vendor']); ?></option>
+                    <?php endwhile; ?>
+                </select>
+            </div>
+        </div>
 
-            <h5 class="fw-bold mb-3">Daftar Barang yang Dibeli</h5>
-            <div class="table-responsive mb-3">
-                <table class="table table-bordered align-middle">
+        <div class="card border-0 shadow-sm rounded-4 overflow-hidden bg-white mb-4">
+            <div class="card-header bg-white text-dark fw-bold py-3 px-4 d-flex justify-content-between align-items-center">
+                <span>Daftar Barang Pengadaan</span>
+                <button type="button" class="btn btn-success btn-sm fw-bold px-3" onclick="tambahBaris()">+ Tambah Baris</button>
+            </div>
+            <div class="table-responsive">
+                <table class="table table-hover align-middle mb-0" id="tabel-item">
                     <thead class="table-light text-uppercase fs-7 text-secondary">
                         <tr>
-                            <th>Pilih Barang</th>
-                            <th width="20%">Jumlah (Qty)</th>
-                            <th width="25%">Harga Beli Satuan (Rp)</th>
-                            <th width="10%" class="text-center">Aksi</th>
+                            <th class="py-3 px-4">Nama Barang</th>
+                            <th class="py-3">Harga Satuan</th>
+                            <th class="py-3">Jumlah</th>
+                            <th class="py-3">Subtotal</th>
+                            <th class="py-3 text-center">Aksi</th>
                         </tr>
                     </thead>
-                    <tbody id="row-container-pengadaan">
+                    <tbody id="body-item">
                         <tr>
-                            <td>
-                                <select name="idbarang[]" class="form-select rounded-3" required>
-                                    <option value="">-- Pilih Barang --</option>
-                                    <?php 
-                                    mysqli_data_seek($barang_result, 0);
-                                    while($b = mysqli_fetch_assoc($barang_result)): 
-                                    ?>
-                                        <option value="<?= $b['idbarang']; ?>"><?= $b['nama']; ?></option>
-                                    <?php endwhile; ?>
+                            <td class="px-4">
+                                <select name="idbarang[]" class="form-select pilih-barang" required onchange="updateHarga(this)">
+                                    <option value="" disabled selected>-- Pilih Barang --</option>
+                                    <?= $barang_options; ?>
                                 </select>
                             </td>
                             <td>
-                                <input type="number" name="jumlah[]" class="form-control rounded-3" placeholder="Qty" min="1" required>
+                                <input type="number" name="harga_satuan[]" class="form-control input-harga" readonly required>
                             </td>
                             <td>
-                                <input type="number" name="harga_satuan[]" class="form-control rounded-3" placeholder="Harga Satuan" min="0" required>
+                                <input type="number" name="jumlah[]" class="form-control input-jumlah" min="1" value="1" required oninput="hitungSubtotal(this)">
+                            </td>
+                            <td>
+                                <input type="text" class="form-control input-subtotal" readonly value="0">
                             </td>
                             <td class="text-center">
-                                <button type="button" class="btn btn-danger btn-sm w-100" disabled>Hapus</button>
+                                <button type="button" class="btn btn-danger btn-sm fw-bold px-2 py-1" onclick="hapusBaris(this)">Hapus</button>
                             </td>
                         </tr>
                     </tbody>
                 </table>
             </div>
-
-            <button type="button" id="tambah-baris-pengadaan" class="btn btn-secondary btn-sm rounded-3 mb-4">+ Tambah Baris Barang</button>
-
-            <div class="d-flex justify-content-between">
-                <a href="index.php?page=pengadaan" class="btn btn-dark rounded-3 px-4 py-2 fw-semibold">Kembali</a>
-                <button type="submit" name="simpan_pengadaan" class="btn btn-success rounded-3 px-4 py-2 fw-bold shadow-sm">Simpan Pengadaan</button>
+            <div class="card-footer bg-light p-4 text-end">
+                <h5 class="fw-bold text-dark mb-0">Total Keseluruhan: <span class="text-success" id="grand-total">Rp 0</span></h5>
             </div>
-        </form>
-    </div>
+        </div>
+
+        <div class="text-end">
+            <button type="submit" name="simpan_pengadaan" class="btn btn-success fw-bold px-5 py-3 rounded-3 shadow-sm fs-6">
+                Simpan Pengadaan
+            </button>
+        </div>
+    </form>
 </div>
 
 <script>
-document.getElementById('tambah-baris-pengadaan').addEventListener('click', function() {
-    let container = document.getElementById('row-container-pengadaan');
-    let firstRow = container.querySelector('tr');
-    let newRow = firstRow.cloneNode(true);
-    
-    newRow.querySelectorAll('input').forEach(input => input.value = '');
-    newRow.querySelectorAll('select').forEach(select => select.selectedIndex = 0);
-    
-    let deleteBtn = newRow.querySelector('button');
-    deleteBtn.removeAttribute('disabled');
-    deleteBtn.classList.replace('btn-danger', 'btn-outline-danger');
-    deleteBtn.addEventListener('click', function() {
-        newRow.remove();
-    });
+var templateOpsiBarang = '<?= addslashes($barang_options); ?>';
 
-    container.appendChild(newRow);
-});
+function tambahBaris() {
+    var tbody = document.getElementById('body-item');
+    var tr = document.createElement('tr');
+    tr.innerHTML = `
+        <td class="px-4">
+            <select name="idbarang[]" class="form-select pilih-barang" required onchange="updateHarga(this)">
+                <option value="" disabled selected>-- Pilih Barang --</option>
+                ${templateOpsiBarang}
+            </select>
+        </td>
+        <td>
+            <input type="number" name="harga_satuan[]" class="form-control input-harga" readonly required>
+        </td>
+        <td>
+            <input type="number" name="jumlah[]" class="form-control input-jumlah" min="1" value="1" required oninput="hitungSubtotal(this)">
+        </td>
+        <td>
+            <input type="text" class="form-control input-subtotal" readonly value="0">
+        </td>
+        <td class="text-center">
+            <button type="button" class="btn btn-danger btn-sm fw-bold px-2 py-1" onclick="hapusBaris(this)">Hapus</button>
+        </td>
+    `;
+    tbody.appendChild(tr);
+}
+
+function hapusBaris(btn) {
+    var tbody = document.getElementById('body-item');
+    if (tbody.rows.length > 1) {
+        btn.closest('tr').remove();
+        hitungGrandTotal();
+    } else {
+        alert('Minimal harus ada 1 barang dalam pengadaan.');
+    }
+}
+
+function updateHarga(selectObj) {
+    var row = selectObj.closest('tr');
+    var selectedOption = selectObj.options[selectObj.selectedIndex];
+    var harga = selectedOption.getAttribute('data-harga') || 0;
+    
+    var inputHarga = row.querySelector('.input-harga');
+    inputHarga.value = harga;
+    
+    hitungSubtotal(inputHarga);
+}
+
+function hitungSubtotal(element) {
+    var row = element.closest('tr');
+    var harga = parseFloat(row.querySelector('.input-harga').value) || 0;
+    var jumlah = parseFloat(row.querySelector('.input-jumlah').value) || 0;
+    var subtotal = harga * jumlah;
+    
+    row.querySelector('.input-subtotal').value = subtotal.toLocaleString('id-ID');
+    hitungGrandTotal();
+}
+
+function hitungGrandTotal() {
+    var subtotalInputs = document.querySelectorAll('.input-subtotal');
+    var grandTotal = 0;
+    
+    subtotalInputs.forEach(function(input) {
+        var val = input.value.replace(/\./g, '');
+        grandTotal += parseFloat(val) || 0;
+    });
+    
+    document.getElementById('grand-total').innerText = 'Rp ' + grandTotal.toLocaleString('id-ID');
+}
 </script>

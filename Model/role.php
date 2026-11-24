@@ -1,9 +1,38 @@
 <?php
 require_once __DIR__ . '/../dbconnection.php';
+
+if (session_status() === PHP_SESSION_NONE) {
+    session_start();
+}
+
 $db = new DBconnection();
 $conn = $db->get_connection();
 
+$role_aktif = $_SESSION['role'] ?? '';
+
+if (!empty($_SESSION['iduser'])) {
+    $iduser_aktif = intval($_SESSION['iduser']);
+    $q_role = mysqli_query($conn, "
+        SELECT r.*
+        FROM user u
+        LEFT JOIN role r ON u.idrole = r.idrole
+        WHERE u.iduser = $iduser_aktif
+        LIMIT 1
+    ");
+    if ($q_role && $row_role = mysqli_fetch_assoc($q_role)) {
+        $role_aktif = $row_role['nama_role'] ?? $row_role['role'] ?? $row_role['nama'] ?? $role_aktif;
+        $_SESSION['role'] = $role_aktif;
+    }
+}
+
+$is_admin = (strtolower(trim((string)$role_aktif)) === 'administrator');
+
 if ($_SERVER['REQUEST_METHOD'] == 'POST' && isset($_POST['aksi'])) {
+    if (!$is_admin) {
+        echo "<script>alert('Akses ditolak! Hanya Administrator yang dapat menambah atau mengubah data role.'); window.location='index.php?page=role';</script>";
+        exit();
+    }
+
     $nama_role = mysqli_real_escape_string($conn, $_POST['nama_role']);
     
     if ($_POST['aksi'] == 'tambah') {
@@ -12,14 +41,19 @@ if ($_SERVER['REQUEST_METHOD'] == 'POST' && isset($_POST['aksi'])) {
         $id = intval($_POST['idrole']);
         mysqli_query($conn, "UPDATE role SET nama_role = '$nama_role' WHERE idrole = $id");
     }
-    header("Location: index.php?page=role");
+    echo "<script>window.location='index.php?page=role';</script>";
     exit();
 }
 
 if (isset($_GET['aksi']) && $_GET['aksi'] == 'hapus') {
+    if (!$is_admin) {
+        echo "<script>alert('Akses ditolak! Hanya Administrator yang dapat menghapus data role.'); window.location='index.php?page=role';</script>";
+        exit();
+    }
+
     $id = intval($_GET['id']);
     mysqli_query($conn, "DELETE FROM role WHERE idrole = $id");
-    header("Location: index.php?page=role");
+    echo "<script>window.location='index.php?page=role';</script>";
     exit();
 }
 
@@ -33,7 +67,9 @@ $result = mysqli_query($conn, "SELECT * FROM v_role");
                 <h3 class="fw-bold text-dark mb-1">Data Role</h3>
                 <p class="text-muted mb-0">Kelola hak akses dan peran pengguna.</p>
             </div>
-            <button type="button" class="btn btn-success fw-bold px-4 py-2 rounded-3 shadow-sm" data-bs-toggle="modal" data-bs-target="#modalTambahRole">+ Tambah Role</button>
+            <?php if ($is_admin): ?>
+                <button type="button" class="btn btn-success fw-bold px-4 py-2 rounded-3 shadow-sm" data-bs-toggle="modal" data-bs-target="#modalTambahRole">+ Tambah Role</button>
+            <?php endif; ?>
         </div>
     </div>
 
@@ -44,7 +80,9 @@ $result = mysqli_query($conn, "SELECT * FROM v_role");
                     <tr>
                         <th class="py-3 px-4">ID</th>
                         <th class="py-3">Nama Role</th>
-                        <th class="py-3 text-center">Aksi</th>
+                        <?php if ($is_admin): ?>
+                            <th class="py-3 text-center">Aksi</th>
+                        <?php endif; ?>
                     </tr>
                 </thead>
                 <tbody>
@@ -56,11 +94,15 @@ $result = mysqli_query($conn, "SELECT * FROM v_role");
                             <td class="px-4 fw-bold text-muted"><?= $row['idrole']; ?></td>
                             <td class="fw-bold text-dark"><?= htmlspecialchars($row['nama_role']); ?></td>
                             <td class="text-center">
-                                <button type="button" class="btn btn-warning btn-sm fw-bold text-dark px-3 py-1 rounded-2 shadow-sm me-1" data-bs-toggle="modal" data-bs-target="#modalEditRole<?= $row['idrole']; ?>">Edit</button>
-                                <a href="index.php?page=role&aksi=hapus&id=<?= $row['idrole']; ?>" class="btn btn-danger btn-sm fw-bold px-3 py-1 rounded-2 shadow-sm" onclick="return confirm('Yakin ingin menghapus data ini?')">Hapus</a>
+                                <?php if ($is_admin): ?>
+                                    <button type="button" class="btn btn-warning btn-sm fw-bold text-dark px-3 py-1 rounded-2 shadow-sm me-1" data-bs-toggle="modal" data-bs-target="#modalEditRole<?= $row['idrole']; ?>">Edit</button>
+                                    <a href="index.php?page=role&aksi=hapus&id=<?= $row['idrole']; ?>" class="btn btn-danger btn-sm fw-bold px-3 py-1 rounded-2 shadow-sm" onclick="return confirm('Yakin ingin menghapus data ini?')">Hapus</a>
+                               
+                                <?php endif; ?>
                             </td>
                         </tr>
 
+                        <?php if ($is_admin): ?>
                         <!-- MODAL EDIT ROLE -->
                         <div class="modal fade" id="modalEditRole<?= $row['idrole']; ?>" tabindex="-1" aria-hidden="true">
                             <div class="modal-dialog modal-dialog-centered">
@@ -86,6 +128,7 @@ $result = mysqli_query($conn, "SELECT * FROM v_role");
                                 </div>
                             </div>
                         </div>
+                        <?php endif; ?>
                     <?php endwhile; else: ?>
                         <tr><td colspan="3" class="text-center py-4 text-muted">Belum ada data role.</td></tr>
                     <?php endif; ?>
@@ -95,6 +138,7 @@ $result = mysqli_query($conn, "SELECT * FROM v_role");
     </div>
 </div>
 
+<?php if ($is_admin): ?>
 <div class="modal fade" id="modalTambahRole" tabindex="-1" aria-hidden="true">
     <div class="modal-dialog modal-dialog-centered">
         <div class="modal-content border-0 shadow rounded-4">
@@ -118,3 +162,4 @@ $result = mysqli_query($conn, "SELECT * FROM v_role");
         </div>
     </div>
 </div>
+<?php endif; ?>

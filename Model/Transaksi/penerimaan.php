@@ -1,135 +1,154 @@
 <?php
 require_once __DIR__ . '/../../dbconnection.php';
+
+if (session_status() === PHP_SESSION_NONE) {
+    session_start();
+}
+
 $db = new DBconnection();
 $conn = $db->get_connection();
 
-if (isset($_GET['terima_id'])) {
-    $id_pengadaan = intval($_GET['terima_id']);
-    $iduser = $_SESSION['iduser'] ?? 1; 
+$role_aktif = $_SESSION['role'] ?? '';
 
-    mysqli_begin_transaction($conn);
-
-    try {
-        $query_penerimaan = "INSERT INTO penerimaan (created_at, status, idpengadaan, iduser) VALUES (NOW(), '1', '$id_pengadaan', '$iduser')";
-        if (!mysqli_query($conn, $query_penerimaan)) {
-            throw new Exception("Gagal menyimpan header penerimaan: " . mysqli_error($conn));
-        }
-        
-        $idpenerimaan_baru = mysqli_insert_id($conn);
-
-        $q_detail_po = mysqli_query($conn, "SELECT * FROM detail_pengadaan WHERE idpengadaan = '$id_pengadaan'");
-        
-        while ($item = mysqli_fetch_assoc($q_detail_po)) {
-            $query_sp = "CALL sp_tambah_detail_penerimaan('$idpenerimaan_baru', '{$item['idbarang']}', '{$item['jumlah']}', '{$item['harga_satuan']}')";
-            if (!mysqli_query($conn, $query_sp)) {
-                throw new Exception("Gagal mengeksekusi SP detail penerimaan: " . mysqli_error($conn));
-            }
-        }
-
-        mysqli_commit($conn);
-        echo "<script>alert('Pengadaan berhasil dikonfirmasi! Stok otomatis bertambah.'); window.location='index.php?page=penerimaan';</script>";
-
-    } catch (Exception $e) {
-        mysqli_rollback($conn);
-        echo "<script>alert('Error: " . $e->getMessage() . "'); window.location='index.php?page=penerimaan';</script>";
+if (!empty($_SESSION['iduser'])) {
+    $iduser_aktif = intval($_SESSION['iduser']);
+    $q_role = mysqli_query($conn, "
+        SELECT r.*
+        FROM user u
+        LEFT JOIN role r ON u.idrole = r.idrole
+        WHERE u.iduser = $iduser_aktif
+        LIMIT 1
+    ");
+    if ($q_role && $row_role = mysqli_fetch_assoc($q_role)) {
+        $role_aktif = $row_role['nama_role'] ?? $row_role['role'] ?? $row_role['nama'] ?? $role_aktif;
+        $_SESSION['role'] = $role_aktif;
     }
 }
 
-$result_pending = mysqli_query($conn, "SELECT p.*, v.nama_vendor, u.username FROM pengadaan p JOIN vendor v ON p.vendor_idvendor = v.idvendor JOIN user u ON p.user_iduser = u.iduser WHERE p.idpengadaan NOT IN (SELECT idpengadaan FROM penerimaan) ORDER BY p.idpengadaan DESC");
+$role_clean = strtolower(trim((string)$role_aktif));
+$is_admin = ($role_clean === 'administrator');
+$is_gudang = ($role_clean === 'gudang');
+$can_proses_penerimaan = ($is_admin || $is_gudang);
 
-$result_selesai = mysqli_query($conn, "SELECT p.*, u.username FROM penerimaan p JOIN user u ON p.iduser = u.iduser ORDER BY p.idpenerimaan DESC");
+$result_pending = null;
+if ($can_proses_penerimaan) {
+    $query_pending = "SELECT p.*, v.nama_vendor, u.username 
+                      FROM pengadaan p 
+                      JOIN vendor v ON p.vendor_idvendor = v.idvendor 
+                      JOIN user u ON p.user_iduser = u.iduser 
+                      WHERE p.status != '1' 
+                      ORDER BY p.idpengadaan DESC";
+    $result_pending = mysqli_query($conn, $query_pending);
+}
+
+$query_selesai = "SELECT penerimaan.*, 
+                         pengadaan.idpengadaan, 
+                         vendor.nama_vendor, 
+                         user.username,
+                         COALESCE(dp_sum.subtotal_diterima, 0) AS subtotal_diterima
+                  FROM penerimaan 
+                  JOIN pengadaan ON penerimaan.idpengadaan = pengadaan.idpengadaan 
+                  JOIN vendor ON pengadaan.vendor_idvendor = vendor.idvendor 
+                  JOIN user ON penerimaan.iduser = user.iduser 
+                  LEFT JOIN (
+                      SELECT idpenerimaan, 
+                             SUM(jumlah_terima * harga_satuan_terima) AS subtotal_diterima
+                      FROM detail_penerimaan
+                      GROUP BY idpenerimaan
+                  ) dp_sum ON penerimaan.idpenerimaan = dp_sum.idpenerimaan
+                  ORDER BY penerimaan.idpenerimaan DESC";
+$result_selesai = mysqli_query($conn, $query_selesai);
 ?>
 
-
-<div class="container-fluid px-4">
-    <h2 class="mt-4 fw-bold">Data Penerimaan Barang</h2>
-    <p class="text-muted">Kelola catatan penerimaan barang dari pesanan pengadaan vendor.</p>
-
-    <div class="card shadow-sm mb-4">
-        <div class="card-header text-dark fw-bold">
-            Daftar Pengadaan Menunggu Konfirmasi Penerimaan
-        </div>
-        <div class="card-body table-responsive">
-            <table class="table table-bordered table-striped align-middle">
-                <thead>
-                    <tr>
-                        <th>No</th>
-                        <th>ID PO</th>
-                        <th>Tanggal Pengadaan</th>
-                        <th>Vendor</th>
-                        <th>Total Nilai</th>
-                        <th>Admin PO</th>
-                        <th>Aksi</th>
-                    </tr>
-                </thead>
-                <tbody>
-                    <?php 
-                    $no = 1;
-                    if ($result_pending && mysqli_num_rows($result_pending) > 0):
-                        while($row = mysqli_fetch_assoc($result_pending)): 
-                    ?>
-                        <tr>
-                            <td><?= $no++; ?></td>
-                            <td><strong><?= $row['idpengadaan']; ?></strong></td>
-                            <td><?= $row['timestamp']; ?></td>
-                            <td><?= htmlspecialchars($row['nama_vendor']); ?></td>
-                            <td>Rp <?= number_format($row['total_nilai'], 0, ',', '.'); ?></td>
-                            <td><?= htmlspecialchars($row['username']); ?></td>
-                            <td>
-                                <a href="index.php?page=penerimaan&terima_id=<?= $row['idpengadaan']; ?>" 
-                                   class="btn btn-sm btn-dark fw-bold"
-                                   onclick="return confirm('Konfirmasi pengadaan #<?= $row['idpengadaan']; ?>? Stok akan bertambah otomatis.')">
-                                    Konfirmasi Terima
-                                </a>
-                            </td>
-                        </tr>
-                    <?php 
-                        endwhile; 
-                    else:
-                    ?>
-                        <tr>
-                            <td colspan="7" class="text-center text-muted">Tidak ada pengadaan baru yang perlu dikonfirmasi.</td>
-                        </tr>
-                    <?php endif; ?>
-                </tbody>
-            </table>
+<div class="container-fluid px-0">
+    <div class="card border-0 shadow-sm rounded-4 p-4 mb-4 bg-white">
+        <div>
+            <h3 class="fw-bold text-dark mb-1">Data Penerimaan Barang</h3>
+            <p class="text-muted mb-0">Kelola catatan penerimaan barang dari pesanan pengadaan vendor secara parsial atau penuh.</p>
         </div>
     </div>
 
-    <div class="card shadow-sm">
-        <div class="card-header text-dar fw-bold">
+    <?php if ($can_proses_penerimaan): ?>
+        <div class="card border-0 shadow-sm rounded-4 overflow-hidden bg-white mb-4">
+            <div class="card-header bg-white text-dark fw-bold py-3 px-4 rounded-top-4">
+                Daftar Pengadaan 
+            </div>
+            <div class="table-responsive">
+                <table class="table table-hover align-middle mb-0">
+                    <thead class="table-light text-uppercase fs-7 text-secondary">
+                        <tr>
+                            <th class="py-3 px-4">No</th>
+                            <th class="py-3">ID PO</th>
+                            <th class="py-3">Tanggal Pengadaan</th>
+                            <th class="py-3">Vendor</th>
+                            <th class="py-3">Total Nilai</th>
+                            <th class="py-3">Admin PO</th>
+                            <th class="py-3 text-center">Aksi</th>
+                        </tr>
+                    </thead>
+                    <tbody>
+                        <?php 
+                        $no = 1;
+                        if ($result_pending && mysqli_num_rows($result_pending) > 0):
+                            while($row = mysqli_fetch_assoc($result_pending)): 
+                        ?>
+                            <tr>
+                                <td class="px-4 text-muted"><?= $no++; ?></td>
+                                <td><strong class="text-dark"><?= $row['idpengadaan']; ?></strong></td>
+                                <td><?= htmlspecialchars($row['timestamp']); ?></td>
+                                <td class="fw-semibold text-dark"><?= htmlspecialchars($row['nama_vendor']); ?></td>
+                                <td>Rp <?= number_format($row['total_nilai'], 0, ',', '.'); ?></td>
+                                <td><?= htmlspecialchars($row['username']); ?></td>
+                                <td class="text-center">
+                                    <a href="index.php?page=konfirmasi_penerimaan&idpengadaan=<?= $row['idpengadaan']; ?>" class="btn btn-success btn-sm fw-bold px-3 py-1 rounded-2 shadow-sm">
+                                        Terima Barang
+                                    </a>
+                                </td>
+                            </tr>
+                        <?php endwhile; else: ?>
+                            <tr><td colspan="7" class="text-center py-4 text-muted">Tidak ada pengadaan aktif yang perlu diterima.</td></tr>
+                        <?php endif; ?>
+                    </tbody>
+                </table>
+            </div>
+        </div>
+    <?php endif; ?>
+
+    <div class="card border-0 shadow-sm rounded-4 overflow-hidden bg-white">
+        <div class="card-header bg-white text-dark fw-bold py-3 px-4 rounded-top-4">
             Daftar Riwayat Penerimaan Barang
         </div>
-        <div class="card-body table-responsive">
-            <table class="table table-bordered table-striped align-middle">
-                <thead>
+        <div class="table-responsive">
+            <table class="table table-hover align-middle mb-0">
+                <thead class="table-light text-uppercase fs-7 text-secondary">
                     <tr>
-                        <th>ID Penerimaan</th>
-                        <th>Tanggal / Waktu</th>
-                        <th>ID Pengadaan (PO)</th>
-                        <th>Petugas (User)</th>
-                        <th>Status</th>
+                        <th class="py-3 px-4">ID Penerimaan</th>
+                        <th class="py-3">Tanggal / Waktu</th>
+                        <th class="py-3">ID Pengadaan (PO)</th>
+                        <th class="py-3">Vendor</th>
+                        <th class="py-3">Petugas (User)</th>
+                        <th class="py-3">Subtotal</th>
+                        <th class="py-3 text-center">Aksi</th>
                     </tr>
                 </thead>
                 <tbody>
-                    <?php 
-                    if ($result_selesai && mysqli_num_rows($result_selesai) > 0):
-                        while($selesai = mysqli_fetch_assoc($result_selesai)): 
-                    ?>
-                        <tr>
-                            <td><?= $selesai['idpenerimaan']; ?></td>
-                            <td><?= $selesai['created_at']; ?></td>
-                            <td><strong><?= $selesai['idpengadaan']; ?></strong></td>
-                            <td><?= htmlspecialchars($selesai['username']); ?></td>
-                            <td><span class="badge bg-success text-white">Selesai</span></td>
-                        </tr>
-                    <?php 
-                        endwhile; 
-                    else:
-                    ?>
-                        <tr>
-                            <td colspan="5" class="text-center text-muted">Belum ada riwayat penerimaan barang.</td>
-                        </tr>
+                    <?php if ($result_selesai && mysqli_num_rows($result_selesai) > 0): ?>
+                        <?php while($selesai = mysqli_fetch_assoc($result_selesai)): ?>
+                            <tr>
+                                <td class="px-4 fw-bold text-muted"><?= $selesai['idpenerimaan']; ?></td>
+                                <td><?= htmlspecialchars($selesai['created_at']); ?></td>
+                                <td><strong class="text-dark"><?= $selesai['idpengadaan']; ?></strong></td>
+                                <td class="fw-semibold text-dark"><?= htmlspecialchars($selesai['nama_vendor']); ?></td>
+                                <td><?= htmlspecialchars($selesai['username']); ?></td>
+                                <td class="fw-bold text-success">Rp <?= number_format((float)$selesai['subtotal_diterima'], 0, ',', '.'); ?></td>
+                                <td class="text-center">
+                                    <a href="index.php?page=detail_penerimaan&id=<?= $selesai['idpenerimaan']; ?>" class="btn btn-success btn-sm fw-bold px-3 py-1 rounded-2 shadow-sm">
+                                        Lihat Detail
+                                    </a>
+                                </td>
+                            </tr>
+                        <?php endwhile; else: ?>
+                            <tr><td colspan="7" class="text-center py-4 text-muted">Belum ada riwayat penerimaan barang.</td></tr>
                     <?php endif; ?>
                 </tbody>
             </table>

@@ -2,14 +2,70 @@
 require_once __DIR__ . '/../../dbconnection.php';
 $conn = (new DBconnection())->get_connection();
 
-$barang_result = mysqli_query($conn, "SELECT barang.*, COALESCE((SELECT stock FROM kartu_stok WHERE idbarang = barang.idbarang ORDER BY idkartu_stok DESC LIMIT 1), 0) AS stok FROM barang");
-$margin_result = mysqli_query($conn, "SELECT * FROM margin_penjualan");
-$user_result   = mysqli_query($conn, "SELECT * FROM user");
+if (session_status() === PHP_SESSION_NONE) {
+    session_start();
+}
+
+$role_aktif = $_SESSION['role'] ?? '';
+
+if (!empty($_SESSION['iduser'])) {
+    $iduser_aktif = intval($_SESSION['iduser']);
+    $q_role = mysqli_query($conn, "
+        SELECT r.*
+        FROM user u
+        LEFT JOIN role r ON u.idrole = r.idrole
+        WHERE u.iduser = $iduser_aktif
+        LIMIT 1
+    ");
+    if ($q_role && $row_role = mysqli_fetch_assoc($q_role)) {
+        $role_aktif = $row_role['nama_role'] ?? $row_role['role'] ?? $row_role['nama'] ?? $role_aktif;
+        $_SESSION['role'] = $role_aktif;
+    }
+}
+
+$role_clean = strtolower(trim((string)$role_aktif));
+$is_admin = ($role_clean === 'administrator');
+$is_kasir = ($role_clean === 'kasir');
+$can_tambah_penjualan = ($is_admin || $is_kasir);
+
+if (!$can_tambah_penjualan) {
+    echo "<script>alert('Akses ditolak! Hanya Kasir dan Administrator yang dapat menambah transaksi penjualan.'); window.location='index.php?page=penjualan';</script>";
+    exit();
+}
+
+$sql_barang = "
+    SELECT 
+        barang.*, 
+        COALESCE((
+            SELECT stock 
+            FROM kartu_stok 
+            WHERE idbarang = barang.idbarang 
+            ORDER BY idkartu_stok DESC 
+            LIMIT 1
+        ), 0) AS stok 
+    FROM barang
+    HAVING stok > 0
+    ORDER BY barang.nama ASC
+";
+$barang_result = mysqli_query($conn, $sql_barang);
+
+$stok_map = [];
+while ($row_b = mysqli_fetch_assoc($barang_result)) {
+    $stok_map[intval($row_b['idbarang'])] = intval($row_b['stok']);
+}
+
+$q_margin = mysqli_query($conn, "SELECT idmargin_penjualan, persen FROM margin_penjualan WHERE status = 1 LIMIT 1");
+$active_margin = mysqli_fetch_assoc($q_margin);
 
 if (isset($_POST['simpan'])) {
-    $idmargin   = $_POST['idmargin_penjualan'];
+    if (!$active_margin) {
+        echo "<script>alert('Tidak ada margin penjualan yang aktif saat ini. Harap aktifkan salah satu margin terlebih dahulu!'); window.location='index.php?page=margin';</script>";
+        exit();
+    }
+
+    $idmargin   = intval($active_margin['idmargin_penjualan']);
     $ppn_persen = floatval($_POST['ppn']);
-    $iduser     = $_POST['iduser'];
+    $iduser     = intval($_SESSION['iduser'] ?? 1);
 
     $arr_idbarang = $_POST['idbarang'] ?? [];
     $arr_jumlah   = $_POST['jumlah'] ?? [];
@@ -21,22 +77,55 @@ if (isset($_POST['simpan'])) {
         $detail_items = [];
 
         foreach ($arr_idbarang as $index => $idbarang) {
+            $idbarang_clean = intval($idbarang);
             $jumlah = intval($arr_jumlah[$index]);
-            if ($jumlah <= 0 || empty($idbarang)) continue;
+            if ($jumlah <= 0 || $idbarang_clean <= 0) continue;
 
-            $harga_dasar = mysqli_fetch_assoc(mysqli_query($conn, "SELECT harga FROM barang WHERE idbarang = '$idbarang'"))['harga'];
+            $q_cek_stok = mysqli_query($conn, "
+                SELECT 
+                    b.harga,
+                    b.nama,
+                    COALESCE((
+                        SELECT stock 
+                        FROM kartu_stok 
+                        WHERE idbarang = b.idbarang 
+                        ORDER BY idkartu_stok DESC 
+                        LIMIT 1
+                    ), 0) AS stok_terkini
+                FROM barang b
+                WHERE b.idbarang = $idbarang_clean
+                LIMIT 1
+            ");
+            $data_barang = mysqli_fetch_assoc($q_cek_stok);
+
+            if (!$data_barang) {
+                throw new Exception("Barang tidak ditemukan.");
+            }
+
+            $stok_terkini = intval($data_barang['stok_terkini']);
+            if ($stok_terkini <= 0) {
+                throw new Exception("Barang \"{$data_barang['nama']}\" stoknya kosong atau minus ({$stok_terkini}), transaksi tidak dapat dilakukan.");
+            }
+
+            if ($jumlah > $stok_terkini) {
+                throw new Exception("Jumlah beli \"{$data_barang['nama']}\" ({$jumlah}) melebihi stok tersedia ({$stok_terkini}).");
+            }
+
+            $harga_dasar = floatval($data_barang['harga']);
             $sub_item    = mysqli_fetch_assoc(mysqli_query($conn, "SELECT ROUND(hitung_subtotal_margin($harga_dasar, $jumlah, $idmargin), 2) AS subtotal"))['subtotal'];
 
-            $subtotal_global += $sub_item;
+            $subtotal_global += floatval($sub_item);
             $detail_items[] = [
-                'idbarang'     => $idbarang,
+                'idbarang'     => $idbarang_clean,
                 'jumlah'       => $jumlah,
                 'subtotal'     => $sub_item,
-                'harga_satuan' => $sub_item / $jumlah
+                'harga_satuan' => round(floatval($sub_item) / $jumlah)
             ];
         }
 
-        if (empty($detail_items)) throw new Exception("Minimal harus ada 1 barang yang valid dalam transaksi.");
+        if (empty($detail_items)) {
+            throw new Exception("Minimal harus ada 1 barang dengan stok tersedia dalam transaksi.");
+        }
 
         $nominal_ppn = $subtotal_global * ($ppn_persen / 100);
         $total_nilai = mysqli_fetch_assoc(mysqli_query($conn, "SELECT ROUND(hitung_total_nilai($subtotal_global, $nominal_ppn), 2) AS total_nilai"))['total_nilai'];
@@ -45,11 +134,12 @@ if (isset($_POST['simpan'])) {
             throw new Exception("Gagal menyimpan ke tabel penjualan: " . mysqli_error($conn));
         }
 
-        $idpenjualan_baru = mysqli_insert_id($conn);
+        $idpenjualan_baru = intval(mysqli_insert_id($conn));
 
         foreach ($detail_items as $item) {
-            if (!mysqli_query($conn, "INSERT INTO detail_penjualan (harga_satuan, jumlah, subtotal, penjualan_idpenjualan, idbarang) VALUES ('{$item['harga_satuan']}', '{$item['jumlah']}', '{$item['subtotal']}', '$idpenjualan_baru', '{$item['idbarang']}')")) {
-                throw new Exception("Gagal menyimpan ke detail penjualan: " . mysqli_error($conn));
+            $sql_sp = "CALL sp_tambah_detail_penjualan({$idpenjualan_baru}, {$item['idbarang']}, {$item['jumlah']}, {$item['harga_satuan']})";
+            if (!mysqli_query($conn, $sql_sp)) {
+                throw new Exception("Gagal memanggil detail penjualan: " . mysqli_error($conn));
             }
         }
 
@@ -58,7 +148,7 @@ if (isset($_POST['simpan'])) {
 
     } catch (Exception $e) {
         mysqli_rollback($conn);
-        echo "<div class='alert alert-danger'>" . $e->getMessage() . "</div>";
+        echo "<div class='alert alert-danger m-3'>" . htmlspecialchars($e->getMessage()) . "</div>";
     }
 }
 ?>
@@ -71,28 +161,13 @@ if (isset($_POST['simpan'])) {
         <form action="" method="POST">
             <div class="row mb-3">
                 <div class="col-md-6">
-                    <label class="form-label fw-bold">Margin Penjualan (Keuntungan)</label>
-                    <select name="idmargin_penjualan" class="form-select rounded-3" required>
-                        <option value="">-- Pilih Margin Penjualan --</option>
-                        <?php while($m = mysqli_fetch_assoc($margin_result)): ?>
-                            <option value="<?= $m['idmargin_penjualan']; ?>">Margin: <?= $m['persen']; ?>%</option>
-                        <?php endwhile; ?>
-                    </select>
+                    <label class="form-label fw-bold">Margin Penjualan Aktif</label>
+                    <input type="text" class="form-control rounded-3 bg-light text-success fw-bold" value="<?= $active_margin ? htmlspecialchars($active_margin['persen']) . '% ' : 'Tidak ada margin aktif!'; ?>" readonly>
                 </div>
                 <div class="col-md-6">
-                    <label class="form-label fw-bold">Kasir / User</label>
-                    <select name="iduser" class="form-select rounded-3" required>
-                        <option value="">-- Pilih User / Kasir --</option>
-                        <?php while($u = mysqli_fetch_assoc($user_result)): ?>
-                            <option value="<?= $u['iduser']; ?>"><?= $u['username']; ?></option>
-                        <?php endwhile; ?>
-                    </select>
+                    <label class="form-label fw-bold">Persentase PPN (%)</label>
+                    <input type="number" step="0.01" name="ppn" class="form-control rounded-3" value="11" required placeholder="">
                 </div>
-            </div>
-
-            <div class="mb-3">
-                <label class="form-label fw-bold">Persentase PPN (%)</label>
-                <input type="number" step="0.01" name="ppn" class="form-control rounded-3" value="11" required placeholder="Contoh: 11">
             </div>
 
             <hr class="my-4">
@@ -114,9 +189,11 @@ if (isset($_POST['simpan'])) {
                                     <option value="">-- Pilih Barang --</option>
                                     <?php 
                                     mysqli_data_seek($barang_result, 0);
-                                    while($b = mysqli_fetch_assoc($barang_result)): 
+                                    while ($b = mysqli_fetch_assoc($barang_result)): 
                                     ?>
-                                        <option value="<?= $b['idbarang']; ?>"><?= $b['nama']; ?> (Stok: <?= $b['stok']; ?>)</option>
+                                        <option value="<?= intval($b['idbarang']); ?>" data-stok="<?= intval($b['stok']); ?>">
+                                            <?= htmlspecialchars($b['nama']); ?> (Stok: <?= intval($b['stok']); ?>)
+                                        </option>
                                     <?php endwhile; ?>
                                 </select>
                             </td>
@@ -142,12 +219,47 @@ if (isset($_POST['simpan'])) {
 </div>
 
 <script>
+function bindRowEvents(row) {
+    let selectEl = row.querySelector('select[name="idbarang[]"]');
+    let qtyEl = row.querySelector('input[name="jumlah[]"]');
+
+    function syncMaxQty() {
+        let selectedOption = selectEl.options[selectEl.selectedIndex];
+        let stok = selectedOption ? parseInt(selectedOption.getAttribute('data-stok') || '0', 10) : 0;
+
+        if (stok > 0) {
+            qtyEl.max = stok;
+            if (parseInt(qtyEl.value || '0', 10) > stok) {
+                qtyEl.value = stok;
+            }
+        } else {
+            qtyEl.removeAttribute('max');
+        }
+    }
+
+    selectEl.addEventListener('change', syncMaxQty);
+    qtyEl.addEventListener('input', function() {
+        let selectedOption = selectEl.options[selectEl.selectedIndex];
+        let stok = selectedOption ? parseInt(selectedOption.getAttribute('data-stok') || '0', 10) : 0;
+        let val = parseInt(qtyEl.value || '0', 10);
+
+        if (stok > 0 && val > stok) {
+            qtyEl.value = stok;
+        }
+    });
+}
+
+bindRowEvents(document.querySelector('#row-container-penjualan tr'));
+
 document.getElementById('tambah-baris-penjualan').addEventListener('click', function() {
     let container = document.getElementById('row-container-penjualan');
     let firstRow = container.querySelector('tr');
     let newRow = firstRow.cloneNode(true);
     
-    newRow.querySelectorAll('input').forEach(input => input.value = '');
+    newRow.querySelectorAll('input').forEach(input => {
+        input.value = '';
+        input.removeAttribute('max');
+    });
     newRow.querySelectorAll('select').forEach(select => select.selectedIndex = 0);
     
     let deleteBtn = newRow.querySelector('button');
@@ -157,6 +269,7 @@ document.getElementById('tambah-baris-penjualan').addEventListener('click', func
         newRow.remove();
     });
 
+    bindRowEvents(newRow);
     container.appendChild(newRow);
 });
 </script>
